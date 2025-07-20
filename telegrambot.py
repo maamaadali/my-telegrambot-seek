@@ -3,20 +3,17 @@
 import logging
 import os
 import threading
-import html
-import json
-import traceback
 from flask import Flask
-from telegram import Update, ChatMember, ChatMemberUpdated
-from telegram.ext import Application, CommandHandler, ChatMemberHandler, ContextTypes
-from telegram.constants import ParseMode, UpdateType
+from telegram import Update
+from telegram.ext import Application, ChatMemberHandler, ContextTypes
+from telegram.constants import UpdateType
 
 # --- بخش وب‌سرور برای آنلاین نگه داشتن ربات در Render ---
 app = Flask(__name__)
 
 @app.route('/')
 def index():
-    return "Bot is running successfully!"
+    return "Minimalist Debug Bot is running."
 
 def run_webserver():
     port = int(os.environ.get('PORT', 8080))
@@ -30,71 +27,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# خواندن متغیرهای محیطی
+# خواندن توکن از متغیرهای محیطی
 TOKEN = os.environ.get("TOKEN")
-ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """این تابع خطاها را ثبت کرده و برای ادمین ارسال می‌کند."""
-    logger.error("Exception while handling an update:", exc_info=context.error)
-    tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
-    tb_string = "".join(tb_list)
-    update_str = update.to_dict() if isinstance(update, Update) else str(update)
-    message = (
-        f"An exception was raised while handling an update\n"
-        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}</pre>\n\n"
-        f"<pre>{html.escape(tb_string)}</pre>"
-    )
-    if ADMIN_CHAT_ID:
-        for i in range(0, len(message), 4096):
-            await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID, text=message[i:i+4096], parse_mode=ParseMode.HTML
-            )
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """دستور /start برای نمایش پیام خوش‌آمدگویی."""
-    await update.message.reply_text(
-        "ربات فعال است. من را در کانال خود ادمین کنید تا خروج اعضا را به شما گزارش دهم."
-    )
-
-def extract_status_change(chat_member_update: ChatMemberUpdated) -> tuple | None:
-    """تغییرات وضعیت اعضا را بررسی کرده و کاربر خارج شده را برمی‌گرداند."""
-    new_member_status = chat_member_update.new_chat_member.status
-    old_member_status = chat_member_update.old_chat_member.status
-    
-    was_member = old_member_status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
-    is_now_left = new_member_status in [ChatMember.LEFT, ChatMember.BANNED]
-
-    if was_member and is_now_left:
-        return chat_member_update.new_chat_member.user
-    return None
-
-async def track_left_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """تابع اصلی برای رصد اعضای خارج شده و ارسال گزارش به ادمین."""
-    user_who_left = extract_status_change(update.chat_member)
-    if user_who_left:
-        user = user_who_left
-        chat = update.chat_member.chat
-        username = f"(@{user.username})" if user.username else "(نام کاربری ندارد)"
-        message = (
-            f"کاربر زیر کانال «{chat.title}» را ترک کرد:\n\n"
-            f"👤 **نام:** {user.full_name}\n"
-            f"🆔 **شناسه:** `{user.id}`\n"
-            f"🔗 **نام کاربری:** {username}"
-        )
-        logger.info(f"کاربر {user.full_name} کانال {chat.title} را ترک کرد.")
-        if ADMIN_CHAT_ID:
-            await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID, text=message, parse_mode='Markdown'
-            )
+async def chat_member_update_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """این تابع هر تغییری در وضعیت اعضای چت را به صورت واضح در لاگ ثبت می‌کند."""
+    logger.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    logger.info("!!! یک رویداد ورود/خروج عضو دریافت شد !!!")
+    logger.info(update.to_json())
+    logger.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
 def main() -> None:
-    """تابع اصلی برای راه‌اندازی ربات."""
+    """تابع اصلی برای راه‌اندازی ربات در حالت تست."""
     if not TOKEN:
-        logger.error("خطا: توکن ربات (TOKEN) در متغیرهای محیطی تنظیم نشده است.")
+        logger.error("خطای مرگبار: متغیر محیطی توکن (TOKEN) تنظیم نشده است.")
         return
 
-    allowed_updates = [UpdateType.MESSAGE, UpdateType.CHAT_MEMBER]
+    # به طور صریح فقط منتظر رویدادهای مربوط به اعضا می‌مانیم
+    allowed_updates = [UpdateType.CHAT_MEMBER]
 
     application = (
         Application.builder()
@@ -104,14 +54,16 @@ def main() -> None:
         .build()
     )
 
-    application.add_error_handler(error_handler)
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(ChatMemberHandler(track_left_members, ChatMemberHandler.CHAT_MEMBER))
+    # اضافه کردن فقط یک handler برای رصد اعضا
+    application.add_handler(ChatMemberHandler(chat_member_update_handler))
 
-    logger.info("ربات با موفقیت در حال اجراست...")
+    logger.info("ربات تست نهایی شروع به کار کرد. فقط منتظر رویدادهای ورود/خروج است...")
     application.run_polling(allowed_updates=allowed_updates)
 
 if __name__ == "__main__":
+    # اجرای وب‌سرور در یک نخ (thread) جداگانه
     webserver_thread = threading.Thread(target=run_webserver)
     webserver_thread.start()
+    
+    # اجرای ربات در نخ اصلی
     main()
